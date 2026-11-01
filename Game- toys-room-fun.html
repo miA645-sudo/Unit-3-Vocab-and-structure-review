@@ -73,7 +73,16 @@ button:focus-visible{ outline:5px solid var(--purple); outline-offset:4px; }
 .next{ background:var(--orange); animation:pulse 1.2s ease-in-out infinite; }
 @keyframes pulse{ 0%,100%{transform:scale(1)} 50%{transform:scale(1.07)} }
 .hidden{ display:none !important; }
-.showBtn{ background:var(--yellow); }
+.choices{ display:grid; grid-template-columns:1fr 1fr; gap:10px 16px; flex:1 1 640px; max-width:1150px; }
+.choice{ display:flex; align-items:center; gap:12px; text-align:left; background:#fff; border:4px solid var(--ink); border-radius:20px; box-shadow:0 5px 0 var(--ink); font-size:clamp(16px,2.6vh,30px); font-weight:600; line-height:1.15; padding:.25em .7em .25em .35em; min-height:58px; transition:transform .1s, box-shadow .1s, background .2s; }
+.choice:active:not(:disabled){ transform:translateY(4px); box-shadow:0 1px 0 var(--ink); }
+.choice:hover:not(:disabled){ background:#FFF6D6; }
+.choice .letter{ flex:none; width:1.8em; height:1.8em; border-radius:50%; display:grid; place-items:center; color:#fff; border:3px solid var(--ink); font-weight:700; -webkit-text-stroke:1px var(--ink); paint-order:stroke fill; }
+.choice:nth-child(1) .letter{ background:var(--pink); } .choice:nth-child(2) .letter{ background:var(--blue); }
+.choice:nth-child(3) .letter{ background:var(--green); } .choice:nth-child(4) .letter{ background:var(--orange); }
+.choice.right{ background:#C9F5D6; animation:pulse 1.2s ease-in-out 2; }
+.choice.bad{ background:#FFD6D6; opacity:.6; cursor:default; }
+.choice:disabled{ cursor:default; }
 .bubble{ position:relative; background:#fff; color:var(--ink); border:5px solid var(--ink); border-radius:30px; padding:.1em .8em; font-size:var(--fs-big); font-weight:600; box-shadow:0 6px 0 var(--ink); }
 .bubble::after{ content:""; position:absolute; left:40px; bottom:-26px; border:13px solid transparent; border-top-color:var(--ink); }
 .toggle{ display:flex; border:5px solid var(--ink); border-radius:24px; overflow:hidden; box-shadow:0 6px 0 var(--ink); }
@@ -136,8 +145,7 @@ button:focus-visible{ outline:5px solid var(--purple); outline-offset:4px; }
   <div class="roomWrap"><svg id="room" viewBox="0 0 1672 941" preserveAspectRatio="xMidYMid meet" aria-label="A child’s room with a bed, a toy box, a table with a computer, a chair and a school bag"></svg></div>
   <div class="controls" id="controls">
     <div class="shelf hidden" id="shelf"><div class="shelfToy" id="shelfToy"></div></div>
-    <div class="bubble hidden" id="bubble">It’s ___ the ___.</div>
-    <button class="chunky showBtn hidden" id="showBtn">Show answer</button>
+    <div class="choices hidden" id="choices" role="group" aria-label="Choose the answer"></div>
     <div class="toggle hidden" id="toggle">
       <button id="orderBtn" aria-pressed="true">In order</button>
       <button id="randomBtn" aria-pressed="false">Random</button>
@@ -384,7 +392,7 @@ function setCard(count, html, speak){
   const c = $("card"); c.classList.remove("slide"); void c.offsetWidth; c.classList.add("slide");
   current = speak; say(speak);
 }
-function controls(list){ ["shelf","bubble","showBtn","toggle","yesBtn","noBtn","nextBtn"].forEach(id=>$(id).classList.toggle("hidden", !list.includes(id))); }
+function controls(list){ ["shelf","choices","toggle","yesBtn","noBtn","nextBtn"].forEach(id=>$(id).classList.toggle("hidden", !list.includes(id))); }
 function startGame(n){
   game = n; round = 0; stars = 0;
   $("gameName").textContent = ["","Put the toy!","Where is it?","Yes or No?"][n];
@@ -473,23 +481,39 @@ function g2Round(){
     if(used.some(u=>u===p || (CLASH[u]||[]).includes(p))) continue;
     addToy(others[used.length], p); used.push(p);
   }
-  const t = TOYS[g2Item.toy];
+  const t = TOYS[g2Item.toy], start = t.plural ? "They’re" : "It’s";
   const q = t.plural ? `Where are the ${t.name}?` : `Where’s the ${t.name}?`;
   setCard(`${round+1} / ${GAME2.length}`, t.plural ? `Where are the <b>${t.name}</b>?` : `Where’s the <b>${t.name}</b>?`, q);
-  $("bubble").textContent = t.plural ? "They’re ___ the ___." : "It’s ___ the ___.";
-  controls(["bubble","showBtn","toggle"]);
+  // four answers: the right place, the places of the other toys in the room, then other places
+  const right = ZONES[g2Item.place].label;
+  const pool = [...used.map(p=>ZONES[p].label), ...Object.keys(ZONES).map(k=>ZONES[k].label).sort(()=>Math.random()-.5)];
+  const opts = [right];
+  for(const lab of pool){ if(opts.length>=4) break; if(!opts.includes(lab)) opts.push(lab); }
+  opts.sort(()=>Math.random()-.5);
+  g2Done = false;
+  $("choices").innerHTML = opts.map((lab,i)=>`<button class="choice" data-right="${lab===right}" data-say="${start} ${lab}."><span class="letter">${"ABCD"[i]}</span><span>${start} ${lab}.</span></button>`).join("");
+  controls(["choices","toggle"]);
 }
-function g2Show(){
-  audio();
-  const t = TOYS[g2Item.toy], lab = ZONES[g2Item.place].label, start = t.plural ? "They’re" : "It’s";
-  $("sentence").innerHTML = `${start} <b>${lab}</b>.`;
-  current = `${start} ${lab}.`; say(current);
-  const target = g2Target || ringFor(g2Item.toy);
-  if(g2Target) g2Target.classList.add("glow");
-  celebrate(target); earnStar();
-  controls(["toggle","nextBtn"]);
+let g2Done = false;
+function g2Answer(btn){
+  if(g2Done || btn.disabled) return; audio();
+  if(btn.dataset.right==="true"){
+    g2Done = true;
+    const t = TOYS[g2Item.toy], lab = ZONES[g2Item.place].label, start = t.plural ? "They’re" : "It’s";
+    btn.classList.add("right");
+    $("choices").querySelectorAll(".choice").forEach(b=>b.disabled = true);
+    $("sentence").innerHTML = `${start} <b>${lab}</b>.`;
+    current = `${start} ${lab}.`; say(`${pick(PRAISE)} ${current}`);
+    const target = g2Target || ringFor(g2Item.toy);
+    if(g2Target) g2Target.classList.add("glow");
+    celebrate(target); earnStar();
+    controls(["choices","nextBtn"]);
+  } else {
+    firstTry = false; sfx.boing(); say("Try again!");
+    btn.classList.add("bad","shake"); btn.disabled = true;
+  }
 }
-$("showBtn").addEventListener("click", g2Show);
+$("choices").addEventListener("click", e=>{ const b = e.target.closest(".choice"); if(b) g2Answer(b); });
 function setMode(random){
   g2Random = random;
   $("orderBtn").setAttribute("aria-pressed", String(!random)); $("randomBtn").setAttribute("aria-pressed", String(random));
